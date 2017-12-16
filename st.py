@@ -2,43 +2,47 @@
 ''' A simple script to upload a random file to Amazon S3 and also display upload speeds
     Requires requests, and boto3 to be functional
 '''
-import os
-import sys
-import time
-import csv
-from pprint import pprint
 
+import os
+import time
+import argparse
+from pprint import pprint
 from random import random
+from tempfile import NamedTemporaryFile
+
 try:
     import boto3
-except:
+except ImportError:
     print("Exception: Please install boto3 module from pip")
+
 try:
     import requests
-except:
+except ImportError:
     print("Exception: Please install requests module from pip")
 
-def make_human(num, suffix='B'):
-    ''' This function takes a number and returns a string with the corresponding suffix '''
-    for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi']:
-        if abs(num) < 1024.0:
-            return "%3.1f%s%s" % (num, unit, suffix)
-        num /= 1024.0
-    return "%.1f%s%s" % (num, 'Yi', suffix)
+parser = argparse.ArgumentParser(description='Amazon Speedtest tool for ranking S3 mirrors')
+parser.add_argument("carousels", help="Number of carousels (trials)", type=int)
+parser.add_argument("--locations", nargs='+', help="List of comma separated locations")
+args = parser.parse_args()
+print(args.locations)
 
 #create temporary randomised file to prevent any compression from affecting the result
-RANDOMFILE = '/tmp/tmpfile{}'.format(int(random()*1000))
-os.system('dd if=/dev/urandom bs=100K count=1 iflag=fullblock of=' + RANDOMFILE + ' &> /dev/null')
+print('Creating a temporary file and adding random data')
+RANDOMFILEOBJECT = NamedTemporaryFile(prefix='speedtest')
+RANDOMFILE = RANDOMFILEOBJECT.name
+with open(RANDOMFILE, 'wb') as f:
+    f.write(os.urandom(1024))
 
 S3RES = boto3.resource('s3')
 
 # If nothing is passed in the cli
 LOCATIONS = []
-if len(sys.argv) == 1:
+if args.locations is None:
     try:
         LOCFILE = open('locations.txt', 'r')
     except:
-        sys.exit('locations file missing')
+        print("Locations file missing, and no locations specified on CLI")
+        quit()
 
     #Since us east does not require any location constraint attribute, deal with it separately
     with open('locations.txt', 'r') as f:
@@ -46,10 +50,7 @@ if len(sys.argv) == 1:
             if line.find('#') == -1:
                 LOCATIONS = LOCATIONS + [line.strip('\n'),]
 else:
-
-    if sys.argv[1] == "--locations":
-        for i in sys.argv[2:]:
-            LOCATIONS.append(i)
+    LOCATIONS = args.locations
 
 BUCKETS = []
 FILES = []
@@ -66,13 +67,10 @@ print("Running download and upload tests...\n")
 for location in LOCATIONS:
     #Deal with us-east-1
     if location == 'us-east-1':
-        NEWBUCKNAME = 'reisubtest-' + str(int(random()*1000))
+        NEWBUCKNAME = 'speedtest-' + str(int(random()*1000))
+        bucket = S3RES.Bucket(NEWBUCKNAME)
+        bucket.create()
         BUCKETS.append(NEWBUCKNAME)
-        S3RES.create_bucket(
-            Bucket=NEWBUCKNAME,
-            # CreateBucketConfiguration={'LocationConstraint': location})
-            )
-
         start = time.time()
         S3RES.Bucket(NEWBUCKNAME).put_object(Key='Test1', Body=open(RANDOMFILE, 'rb'))
         end = time.time()
@@ -98,6 +96,7 @@ for location in LOCATIONS:
         BUCKETS.append(newBuckName)
         S3RES.create_bucket(
             Bucket=newBuckName,
+            # location=location
             CreateBucketConfiguration={'LocationConstraint': location}
             )
 
@@ -122,6 +121,14 @@ for location in LOCATIONS:
         SIZES.append(os.stat(RANDOMFILE).st_size)
 
 i = 0
+
+def make_human(num, suffix='B'):
+    ''' This function takes a number and returns a string with the corresponding suffix '''
+    for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi']:
+        if abs(num) < 1024.0:
+            return "%3.1f%s%s" % (num, unit, suffix)
+        num /= 1024.0
+    return "%.1f%s%s" % (num, 'Yi', suffix)
 
 for i in range(len(DTIMES)):
     DSPEEDS.append(make_human(SIZES[i] / DTIMES[i]) + '/s')
@@ -154,6 +161,3 @@ for location in LOCATIONS:
         latfile.write('\n')
     LATENCIES.append('{0:.2f}'.format(lat) + 'ms')
 pprint(LATENCIES)
-
-os.system('rm -rf ' + RANDOMFILE)
-os.system('rm -rf ' + '/tmp/file')
