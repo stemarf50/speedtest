@@ -24,6 +24,7 @@ except ImportError:
 
 parser = argparse.ArgumentParser(description='Amazon Speedtest tool for ranking S3 mirrors')
 parser.add_argument('-c', '--carousels', help='Number of carousels (trials)', type=int)
+parser.add_argument('-s', '--size', help='Size of test data (MB)', type=float)
 parser.add_argument('--locations', nargs='+', help='List of comma separated locations')
 parser.add_argument('--clean', dest='clean', action='store_true')
 parser.set_defaults(clean=False)
@@ -33,7 +34,7 @@ print(args.locations)
 S3RES = boto3.resource('s3')
 
 if args.clean:
-    for bucket in BUCKETS:
+    for bucket in S3RES.buckets.all():
         if bucket.name.find('speedtest') != -1:
             for key in bucket.objects.all():
                 key.delete()
@@ -73,7 +74,9 @@ print('Creating a temporary file and adding random data')
 RANDOMFILEOBJECT = NamedTemporaryFile(prefix='speedtest')
 RANDOMFILE = RANDOMFILEOBJECT.name
 with open(RANDOMFILE, 'wb') as f:
-    f.write(os.urandom(1024))
+    f.write(os.urandom(args.size))
+
+quit()
 
 print('Running download and upload tests...\n')
 for location in LOCATIONS:
@@ -112,7 +115,6 @@ for location in LOCATIONS:
             # location=location
             CreateBucketConfiguration={'LocationConstraint': location}
             )
-
         start = time.time()
         S3RES.Bucket(newBuckName).put_object(Key='Test1', Body=open(RANDOMFILE, 'rb'))
         end = time.time()
@@ -157,10 +159,8 @@ for bucket in BUCKETS:
 
 # Find the latencies by sending a HTTP request on port 80, ICMP ping command does not necessarily work on all regions.
 # This does mean that the latency will be a bit larger than the expected value with ping command (TCP+HTTP Connection Establishment) but however, the relative latencies of different S3 regions will be as expected
-# RESPONSE = requests.get('http://s3.amazonaws.com')
-# LATENCIES.append('{0:.2f}'.format((RESPONSE.elapsed.total_seconds() * 1000)) + 'ms')
 
-print('Running latency tests...\n')
+print('Running latency tests...')
 for location in LOCATIONS:
     curloc = location
     if location == 'us-east-1':
